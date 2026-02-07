@@ -2,7 +2,7 @@ import aiohttp
 import asyncio
 import logging
 import json
-import datetime
+from datetime import date, datetime, timedelta
 import os
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
@@ -28,15 +28,28 @@ DIFY_WEBHOOK_URL = os.getenv("DIFY_WEBHOOK_URL")
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# Global dictionary to store user messages
+user_contexts = {}
+user_last_active = {}
+# Set expiration time (e.g., 30 minutes)
+EXPIRATION_timedelta = timedelta(minutes=30)
+
 # Function to send data to Dify
 async def send_to_dify(user_id, date_value):
     headers = {
         "Content-Type": "application/json"
     }
     
+    # Retrieve and format stored messages if any
+    ref_content = ""
+    if user_id and user_id in user_contexts:
+        ref_content = "Here are the previous message:\n" + "\n".join(user_contexts[user_id])
+        # user_contexts[user_id] = [] # Clear after reading
+    
     # payload matches the variables you set in Dify's "Start" node
     payload = {
-        "target_date": date_value
+        "target_date": date_value,
+        "history_msg": ref_content
     }
 
     async with aiohttp.ClientSession() as session:
@@ -100,18 +113,54 @@ async def process_simple_calendar(callback_query: types.CallbackQuery, callback_
         # User is navigating months, do nothing
         pass
 
+# 5. Handler for collecting user messages
+@dp.message()
+async def handle_message(message: types.Message):
+    if not message.text or message.text.startswith('/'):
+        return
+        
+    user_id = message.from_user.id
+    if user_id not in user_contexts:
+        user_contexts[user_id] = []
+    
+    user_contexts[user_id].append(f"User: {message.text}")
+    user_last_active[user_id] = datetime.now()
+    logging.info(f"Stored message from {user_id}: {message.text}")
+
+    await send_to_dify(message.from_user.id, date.today().strftime("%Y-%m-%d"))
+
 # 4. Scheduled Job: Runs everyday at a specific time
 async def scheduled_dify_job():
     try:
         logging.info("Running scheduled Dify job...")
-        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        tomorrow = (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")
         
         # We pass None as user_id since it's not used in send_to_dify currently
-        response = await send_to_dify(None, today)
+        response = await send_to_dify(None, tomorrow)
         logging.info(f"Scheduled Job Response: {response}")
         
     except Exception as e:
         logging.error(f"Scheduled Job Error: {e}")
+
+async def cleanup_expired_contexts():
+    """Periodically clean up user contexts that have expired."""
+    try:
+        now = datetime.now()
+        expired_users = []
+        
+        for user_id, last_active in user_last_active.items():
+            if now - last_active > EXPIRATION_timedelta:
+                expired_users.append(user_id)
+        
+        for user_id in expired_users:
+            if user_id in user_contexts:
+                del user_contexts[user_id]
+            if user_id in user_last_active:
+                del user_last_active[user_id]
+            logging.info(f"Cleaned up expired context for user: {user_id}")
+            
+    except Exception as e:
+        logging.error(f"Cleanup Job Error: {e}")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
@@ -124,7 +173,21 @@ async def main():
     # Initialize and start scheduler
     scheduler = AsyncIOScheduler()
     # Add job to run daily at 10:00 pm. Adjust hour/minute as needed.
-    scheduler.add_job(scheduled_dify_job, 'cron', hour=20, minute=0)
+    scheduler.add_job(
+        scheduled_dify_job, 
+        'cron', 
+        hour=22, 
+        minute=0, 
+        timezone='Asia/Singapore'
+    )
+    
+    # Add cleanup job to run every 5 minutes
+    scheduler.add_job(
+        cleanup_expired_contexts,
+        'interval',
+        minutes=5
+    )
+    
     scheduler.start()
     
     await dp.start_polling(bot)

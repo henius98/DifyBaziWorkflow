@@ -94,25 +94,43 @@ python botScript.py
 
 2.  **Copy to systemd** (requires sudo/root):
     ```bash
-    sudo cp bot.service /etc/systemd/system/difybot.service
+    sudo cp telegramBot.service /etc/systemd/system/telegramBot.service
     ```
 
 3.  **Enable and Start**:
     ```bash
     sudo systemctl daemon-reload
-    sudo systemctl enable difybot
-    sudo systemctl start difybot
+    sudo systemctl enable telegramBot
+    sudo systemctl start telegramBot
     ```
 
 4.  **Check Status**:
     ```bash
-    sudo systemctl status difybot
+    sudo systemctl status telegramBot
+    ```
+
+## Updating the Service
+
+If you modify the `telegramBot.service` file or change the code:
+
+1.  **Copy the updated service file (if changed):**
+    ```bash
+    sudo cp telegramBot.service /etc/systemd/system/telegramBot.service
+    ```
+
+2.  **Reload Systemd Daemon (if service file changed):**
+    ```bash
+    sudo systemctl daemon-reload
+    ```
+
+3.  **Restart the Service:**
+    ```bash
+    sudo systemctl restart telegramBot
     ```
 
 ## Troubleshooting
 
 - **Logs**:
     ```bash
-    sudo journalctl -u difybot -f
+    sudo journalctl -u telegramBot -f
     ```
-
