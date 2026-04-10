@@ -6,10 +6,13 @@ use tracing::{error, info};
 
 use crate::state::AppState;
 use crate::calendar::{
-    self, BirthdateCalAction, CalendarAction, TimePickerAction,
+    self, BirthdateCalAction, CalendarAction, GenderAction,
 };
 use crate::db;
 use crate::llm_bazi;
+use crate::paipan;
+use axum::{extract::State, Json};
+use serde::{Deserialize, Serialize};
 
 // ─────────────────────────────────────────────
 // Bot commands
@@ -66,10 +69,8 @@ pub async fn handle_command(
         }
 
         Command::New => {
-            // Show birthdate calendar — fully keyboard-driven, no text input needed
-            let now = chrono::Local::now();
-            let markup = calendar::build_birthdate_calendar(now.year(), now.month());
-            bot.send_message(msg.chat.id, "📅 Step 1/2 — Select your birthdate:\n\nNavigate with ◀️▶️ and tap a day.")
+            let markup = calendar::build_gender_picker();
+            bot.send_message(msg.chat.id, "📅 Step 1/5 — Select your gender:\n\nThis is required for accurate Bazi calculation.")
                 .reply_markup(markup)
                 .await?;
         }
@@ -91,6 +92,40 @@ pub async fn handle_callback(
         None => return Ok(()),
     };
 
+    // ── Gender picker callbacks (bdgen:…) ──────────────────────────────────
+    if calendar::is_gender_picker_callback(data) {
+        let action = match GenderAction::decode(data) {
+            Some(a) => a,
+            None => {
+                bot.answer_callback_query(q.id).await?;
+                return Ok(());
+            }
+        };
+
+        match action {
+            GenderAction::SelectMale | GenderAction::SelectFemale => {
+                let gender_val = if matches!(action, GenderAction::SelectMale) { 1 } else { 0 };
+                let user_id = q.from.id.0 as i64;
+                state.pending_gender.insert(user_id, gender_val);
+
+                let markup = calendar::build_year_picker(1984);
+                if let Some(msg) = &q.message {
+                    let _ = bot
+                        .edit_message_text(
+                            msg.chat().id,
+                            msg.id(),
+                            "📅 Step 2/5 — Select your birth year:",
+                        )
+                        .reply_markup(markup)
+                        .await;
+                }
+            }
+            GenderAction::Ignore => {}
+        }
+        bot.answer_callback_query(q.id).await?;
+        return Ok(());
+    }
+
     // ── Birthdate calendar callbacks (bdcal:…) ────────────────────────────
     if calendar::is_birthdate_cal_callback(data) {
         let action = match BirthdateCalAction::decode(data) {
@@ -102,17 +137,47 @@ pub async fn handle_callback(
         };
 
         match action {
+            BirthdateCalAction::ViewYears { start_year } => {
+                let markup = calendar::build_year_picker(start_year);
+                if let Some(msg) = &q.message {
+                    let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id())
+                        .reply_markup(markup).await;
+                }
+            }
+            BirthdateCalAction::SelectYear(year) => {
+                let markup = calendar::build_month_picker(year);
+                if let Some(msg) = &q.message {
+                    let _ = bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("📅 Step 3/5 — Year: {}\nNow select your birth month:", year)
+                    ).reply_markup(markup).await;
+                }
+            }
+            BirthdateCalAction::SelectMonth { year, month } => {
+                let markup = calendar::build_birthdate_calendar(year, month);
+                if let Some(msg) = &q.message {
+                    let _ = bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("📅 Step 4/5 — Year: {}, Month: {}\nNow select your birth day:", year, month)
+                    ).reply_markup(markup).await;
+                }
+            }
             BirthdateCalAction::SelectDate(date) => {
                 let date_str = date.format("%Y-%m-%d").to_string();
-                // Advance to hour picker
-                let markup = calendar::build_hour_picker(&date_str);
+                let user_id = q.from.id.0 as i64;
+                state.pending_birthdate.insert(user_id, date_str.clone());
+
+                let timepicker_url = state.get_webapp_url("timepicker.html");
+                let markup = calendar::build_time_webapp_inline(&timepicker_url);
+                
                 if let Some(msg) = &q.message {
-                    // Use plain text — MarkdownV2 would require escaping hyphens in the date
                     let _ = bot
                         .edit_message_text(
                             msg.chat().id,
                             msg.id(),
-                            format!("🕐 Step 2/2 — Select your birth hour for {}:", date_str),
+                            format!("🕐 Step 5/5 — Select your birth time for {}:\nPlease tap the button below to open the time picker.", date_str),
                         )
                         .reply_markup(markup)
                         .await;
@@ -135,77 +200,6 @@ pub async fn handle_callback(
         return Ok(());
     }
 
-    // ── Time picker callbacks (bdtime:…) ──────────────────────────────────
-    if calendar::is_time_picker_callback(data) {
-        let action = match TimePickerAction::decode(data) {
-            Some(a) => a,
-            None => {
-                bot.answer_callback_query(q.id).await?;
-                return Ok(());
-            }
-        };
-
-        match action {
-            TimePickerAction::SelectHour { date, hour } => {
-                // Show minute picker for the chosen hour
-                let markup = calendar::build_minute_picker(&date, hour);
-                if let Some(msg) = &q.message {
-                    // Use plain text — MarkdownV2 would require escaping colons and hyphens
-                    let _ = bot
-                        .edit_message_text(
-                            msg.chat().id,
-                            msg.id(),
-                            format!("🕐 Step 2/2 — Birth hour {:02}:__\nNow select the minute:", hour),
-                        )
-                        .reply_markup(markup)
-                        .await;
-                }
-            }
-
-            TimePickerAction::BackToHours { date } => {
-                // Go back to hour picker
-                let markup = calendar::build_hour_picker(&date);
-                if let Some(msg) = &q.message {
-                    // Use plain text — MarkdownV2 would require escaping hyphens in the date
-                    let _ = bot
-                        .edit_message_text(
-                            msg.chat().id,
-                            msg.id(),
-                            format!("🕐 Step 2/2 — Select your birth hour for {}:", date),
-                        )
-                        .reply_markup(markup)
-                        .await;
-                }
-            }
-
-            TimePickerAction::SelectMinute { date, hour, minute } => {
-                // All info collected — save to DB
-                let user_id = q.from.id.0 as i64;
-                let bazi_info = format!("出生日期：{} 出生时间：{:02}:{:02}", date, hour, minute);
-
-                info!("Saving bazi for user {}: {}", user_id, bazi_info);
-                db::save_or_update_user_bazi(&state.db_pool, user_id, &bazi_info).await;
-
-                if let Some(msg) = &q.message {
-                    let _ = bot
-                        .edit_message_text(
-                            msg.chat().id,
-                            msg.id(),
-                            format!(
-                                "✅ Birth information saved!\n\n📅 Date: {}\n🕐 Time: {:02}:{:02}\n\nYour Bazi readings are now personalised. Use /start to begin your analysis.",
-                                date, hour, minute
-                            ),
-                        )
-                        .await;
-                }
-            }
-
-            TimePickerAction::Ignore => {}
-        }
-
-        bot.answer_callback_query(q.id).await?;
-        return Ok(());
-    }
 
     // ── Bazi analysis calendar callbacks (cal:…) ─────────────────────────
     if !calendar::is_calendar_callback(data) {
@@ -249,9 +243,10 @@ pub async fn handle_callback(
                     .await;
 
                 let ref_content = build_history_msg(&state.user_contexts, user_id);
-                let user_bazi = db::get_user_bazi(&state.db_pool, user_id)
+                let user_bazi_raw = db::get_user_bazi(&state.db_pool, user_id)
                     .await
                     .unwrap_or_else(|| state.user_bazi.clone());
+                let user_bazi = get_formatted_bazi(&user_bazi_raw);
 
                 match llm_bazi::generate_bazi_reading(
                     &state.http_client,
@@ -323,9 +318,10 @@ pub async fn handle_callback(
                     .await;
 
                 let ref_content = build_history_msg(&state.user_contexts, user_id);
-                let user_bazi = db::get_user_bazi(&state.db_pool, user_id)
+                let user_bazi_raw = db::get_user_bazi(&state.db_pool, user_id)
                     .await
                     .unwrap_or_else(|| state.user_bazi.clone());
+                let user_bazi = get_formatted_bazi(&user_bazi_raw);
 
                 match llm_bazi::generate_bazi_reading(
                     &state.http_client,
@@ -385,16 +381,106 @@ pub async fn handle_callback(
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+pub struct WebAppSubmission {
+    pub user_id: i64,
+    pub time: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WebAppResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+pub async fn handle_webapp_time(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<WebAppSubmission>,
+) -> Json<WebAppResponse> {
+    let user_id = payload.user_id;
+    let time_str = payload.time;
+
+    info!("Received webapp time from user {}: {}", user_id, time_str);
+
+    let parts: Vec<&str> = time_str.split(':').collect();
+    if parts.len() != 2 {
+        return Json(WebAppResponse { success: false, message: "Invalid time format".to_string() });
+    }
+
+    let (Ok(hour), Ok(minute)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) else {
+        return Json(WebAppResponse { success: false, message: "Invalid time format".to_string() });
+    };
+
+    let date = state.pending_birthdate.get(&user_id)
+        .map(|v| v.clone())
+        .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+    
+    let gender = state.pending_gender.get(&user_id).map(|v| *v).unwrap_or(1);
+    let bot = state.bot.clone();
+    let chat_id = ChatId(user_id);
+
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        // Let the user know we're working
+        let _ = bot.send_message(
+            chat_id, 
+            format!("✅ Time received.\n⏳ Calculating your Bazi chart...\n\n📅 Date: {}\n🕐 Time: {:02}:{:02}", date, hour, minute),
+        ).await;
+
+        let _ = bot.send_chat_action(chat_id, teloxide::types::ChatAction::Typing).await;
+
+        match paipan::fetch_bazi_chart(&state_clone.http_client, &date, hour, minute, gender).await {
+            Ok((chart, raw_json)) => {
+                db::save_or_update_user_bazi(&state_clone.db_pool, user_id, &raw_json, gender).await;
+                let formatted_bazi = paipan::format_bazi_for_prompt(&chart);
+
+                let _ = bot.send_message(
+                    chat_id,
+                    "✅ Bazi chart calculated!\n🔮 Generating destiny analysis... (this may take a moment)",
+                ).await;
+
+                match llm_bazi::generate_destiny_reading(
+                    &formatted_bazi,
+                    &state_clone.openai_api_key,
+                    &state_clone.openai_api_base,
+                    &state_clone.llm_model_name,
+                ).await {
+                    Ok(reading) => {
+                        db::save_request(
+                            &state_clone.db_pool,
+                            user_id,
+                            "new_bazi_reading",
+                            Some(&date),
+                            Some(&format!("Birth details updated (Gender: {})", gender)),
+                            Some(&reading),
+                        ).await;
+
+                        let parts = split_message(&reading, 4000);
+                        for part in parts {
+                            let _ = bot.send_message(chat_id, part).await;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error generating destiny reading: {}", e);
+                        let _ = bot.send_message(chat_id, format!("❌ Error generating analysis: {}", e)).await;
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to fetch bazi chart: {}", e);
+                let _ = bot.send_message(chat_id, format!("❌ Error fetching Bazi chart from API. Please try again later.")).await;
+            }
+        }
+    });
+
+    Json(WebAppResponse { success: true, message: "Time processed".to_string() })
+}
+
 // ─────────────────────────────────────────────
 // Message handler
 // ─────────────────────────────────────────────
 
 pub async fn handle_message(bot: Bot, msg: Message, state: Arc<AppState>) -> ResponseResult<()> {
-    let text = match msg.text() {
-        Some(t) if !t.starts_with('/') => t,
-        _ => return Ok(()),
-    };
-
     let user_id = msg.from.as_ref().map(|u| u.id.0 as i64).unwrap_or(0);
     if user_id == 0 {
         return Ok(());
@@ -411,11 +497,90 @@ pub async fn handle_message(bot: Bot, msg: Message, state: Arc<AppState>) -> Res
         .await;
     }
 
-    // Performance optimization: cap context at 10 messages per user
+    // Process WebAppData first
+    if let Some(app_data) = msg.web_app_data() {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&app_data.data) {
+            if json.get("action").and_then(|v| v.as_str()) == Some("select_time") {
+                if let Some(time_str) = json.get("time").and_then(|v| v.as_str()) {
+                    let parts: Vec<&str> = time_str.split(':').collect();
+                    if parts.len() == 2 {
+                        if let (Ok(hour), Ok(minute)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                            let date = state.pending_birthdate.get(&user_id)
+                                .map(|v| v.clone())
+                                .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+                            
+                            let gender = state.pending_gender.get(&user_id).map(|v| *v).unwrap_or(1);
+                            
+                            // Let the user know we're working
+                            let _ = bot.send_message(
+                                msg.chat.id, 
+                                format!("✅ Time received.\n⏳ Calculating your Bazi chart...\n\n📅 Date: {}\n🕐 Time: {:02}:{:02}", date, hour, minute),
+                            )
+                            .reply_markup(teloxide::types::ReplyMarkup::kb_remove()) // Remove webapp keyboard
+                            .await;
+
+                            let _ = bot.send_chat_action(msg.chat.id, teloxide::types::ChatAction::Typing).await;
+
+                            match paipan::fetch_bazi_chart(&state.http_client, &date, hour, minute, gender).await {
+                                Ok((chart, raw_json)) => {
+                                    db::save_or_update_user_bazi(&state.db_pool, user_id, &raw_json, gender).await;
+                                    let formatted_bazi = paipan::format_bazi_for_prompt(&chart);
+
+                                    let _ = bot.send_message(
+                                        msg.chat.id,
+                                        "✅ Bazi chart calculated!\n🔮 Generating destiny analysis... (this may take a moment)",
+                                    ).await;
+
+                                    match llm_bazi::generate_destiny_reading(
+                                        &formatted_bazi,
+                                        &state.openai_api_key,
+                                        &state.openai_api_base,
+                                        &state.llm_model_name,
+                                    ).await {
+                                        Ok(reading) => {
+                                            db::save_request(
+                                                &state.db_pool,
+                                                user_id,
+                                                "new_bazi_reading",
+                                                Some(&date),
+                                                Some(&format!("Birth details updated (Gender: {})", gender)),
+                                                Some(&reading),
+                                            ).await;
+
+                                            let parts = split_message(&reading, 4000);
+                                            for part in parts {
+                                                bot.send_message(msg.chat.id, part).await?;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("Error generating destiny reading: {}", e);
+                                            bot.send_message(msg.chat.id, format!("❌ Error generating analysis: {}", e)).await?;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to fetch bazi chart: {}", e);
+                                    bot.send_message(msg.chat.id, format!("❌ Error fetching Bazi chart from API. Please try again later.")).await?;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    let text = match msg.text() {
+        Some(t) if !t.starts_with('/') => t,
+        _ => return Ok(()),
+    };
+
+    // Performance optimization: cap context at max_context_messages per user
     {
         let mut messages = state.user_contexts.entry(user_id).or_insert_with(Vec::new);
-        if messages.len() >= 10 {
-            messages.remove(0); // Keep max 10 messages in context
+        if messages.len() >= state.max_context_messages {
+            messages.remove(0); // Keep max messages in context
         }
         messages.push(format!("User: {}", text));
     }
@@ -428,9 +593,10 @@ pub async fn handle_message(bot: Bot, msg: Message, state: Arc<AppState>) -> Res
         .format("%Y-%m-%d")
         .to_string();
     let ref_content = build_history_msg(&state.user_contexts, user_id);
-    let user_bazi = db::get_user_bazi(&state.db_pool, user_id)
+    let user_bazi_raw = db::get_user_bazi(&state.db_pool, user_id)
         .await
         .unwrap_or_else(|| state.user_bazi.clone());
+    let user_bazi = get_formatted_bazi(&user_bazi_raw);
 
     let _ = bot.send_chat_action(msg.chat.id, teloxide::types::ChatAction::Typing).await;
 
@@ -488,4 +654,37 @@ fn build_history_msg(user_contexts: &DashMap<i64, Vec<String>>, user_id: i64) ->
         }
     }
     String::new()
+}
+
+fn get_formatted_bazi(raw_db_str: &str) -> String {
+    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(raw_db_str) {
+        if let Ok(chart) = serde_json::from_value::<crate::paipan::BaziChart>(json_val) {
+            return crate::paipan::format_bazi_for_prompt(&chart);
+        }
+    }
+    raw_db_str.to_string()
+}
+
+fn split_message(text: &str, limit: usize) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    
+    for line in text.lines() {
+        if current.len() + line.len() > limit {
+            result.push(current.clone());
+            current.clear();
+        }
+        current.push_str(line);
+        current.push('\n');
+    }
+    
+    if !current.is_empty() {
+        result.push(current);
+    }
+    
+    if result.is_empty() {
+        result.push(text.to_string());
+    }
+    
+    result
 }

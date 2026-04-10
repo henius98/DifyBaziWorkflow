@@ -1,4 +1,4 @@
-# Deploying DifyBaziWorkflow (Rust) to Raspberry Pi 4B (DietPi OS)
+# Deploying Bazi-telegram-bot (Rust) to Raspberry Pi 4B (DietPi OS)
 
 This guide will help you deploy the Rust Telegram bot to a Raspberry Pi running DietPi OS.
 
@@ -31,6 +31,7 @@ Switch to `dietpi` user or continue as is (adjust paths accordingly). This guide
 ## Step 2: Transfer Files
 
 ### Option A: Using Git (Recommended)
+
 1.  SSH/Login as `dietpi`:
     ```bash
     su - dietpi
@@ -38,27 +39,28 @@ Switch to `dietpi` user or continue as is (adjust paths accordingly). This guide
 2.  Clone your repository:
     ```bash
     git clone <your-repo-url>
-    cd DifyBaziWorkflow
+    cd BaziAgentWorkflow
     ```
 
 ### Option B: Cross-compile on your development machine
+
 ```bash
 # Install the ARM target
 rustup target add aarch64-unknown-linux-gnu
 # Build for Raspberry Pi
 cargo build --release --target aarch64-unknown-linux-gnu
 # Copy the binary
-scp target/aarch64-unknown-linux-gnu/release/dify-telegram-bot dietpi@<your-pi-ip>:/home/dietpi/DifyBaziTelegramBot/
+scp target/aarch64-unknown-linux-gnu/release/Bazi-telegram-bot dietpi@<your-pi-ip>:/home/dietpi/BaziAgentWorkflow/
 ```
 
 ## Step 3: Build (if building on Pi)
 
 ```bash
-cd /home/dietpi/DifyBaziWorkflow
+cd /home/dietpi/BaziAgentWorkflow
 cargo build --release
 ```
 
-The binary will be at `target/release/dify-telegram-bot`.
+The binary will be at `target/release/Bazi-telegram-bot`.
 
 ## Step 4: Configure Environment Variables
 
@@ -68,8 +70,7 @@ The binary will be at `target/release/dify-telegram-bot`.
     ```
 2.  Paste your secrets:
     ```env
-    TOKEN=your_telegram_bot_token_here
-    DIFY_WEBHOOK_URL=your_dify_webhook_url_here
+    TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
     ```
 3.  Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`).
 
@@ -77,25 +78,29 @@ The binary will be at `target/release/dify-telegram-bot`.
 
 ```bash
 # Run from the project directory (so .env is loaded)
-./target/release/dify-telegram-bot
+./target/release/Bazi-telegram-bot
 ```
+
 - Send `/start` to your bot.
 - `Ctrl+C` to stop.
 
 ## Step 6: Set Up Systemd Service (Auto-start)
 
 1.  **Copy binary to deployment directory**:
+
     ```bash
     # (Optional) Verify your .env is present
-    ls -la /home/dietpi/DifyBaziWorkflow/.env
+    ls -la /home/dietpi/BaziAgentWorkflow/.env
     ```
 
 2.  **Copy service file to systemd** (requires sudo/root):
+
     ```bash
     sudo cp telegramBot.service /etc/systemd/system/telegramBot.service
     ```
 
 3.  **Enable and Start**:
+
     ```bash
     sudo systemctl daemon-reload
     sudo systemctl enable telegramBot
@@ -112,13 +117,14 @@ The binary will be at `target/release/dify-telegram-bot`.
 If you modify the code and rebuild:
 
 1.  **Build the new binary:**
+
     ```bash
     cargo build --release
     ```
 
     The service automatically uses the new binary when restarted!
 
-3.  **Restart the Service:**
+2.  **Restart the Service:**
     ```bash
     sudo systemctl restart telegramBot
     ```
@@ -126,11 +132,12 @@ If you modify the code and rebuild:
 ## Troubleshooting
 
 - **Logs**:
-    ```bash
-    sudo journalctl -u telegramBot -f
-    ```
+
+  ```bash
+  sudo journalctl -u telegramBot -f
+  ```
 
 - **Enable debug logging**:
-    ```bash
-    RUST_LOG=debug ./target/release/dify-telegram-bot
-    ```
+  ```bash
+  RUST_LOG=debug ./target/release/Bazi-telegram-bot
+  ```

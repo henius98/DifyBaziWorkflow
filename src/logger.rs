@@ -1,16 +1,78 @@
-use tracing::error;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing::{error, info};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use std::fs;
+use std::time::{Duration, SystemTime};
 
 /// Initializes the logging system for the application.
 /// It uses the `RUST_LOG` environment variable if present.
-/// By default, it sets the log level for `dify_telegram_bot` crate to `info`.
+/// It also outputs logs to the `logs/app.log` file with daily rotation.
 pub fn init() {
-    fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env()
-                .add_directive("dify_telegram_bot=info".parse().expect("Invalid log directive")),
-        )
+    // 1. Prepare the file appender (daily rotation, format: YYYY-MM-DD.log)
+    let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("")
+        .filename_suffix("log")
+        .build("logs")
+        .expect("initializing rolling file appender failed");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    // CRITICAL: We leak the guard so it stays alive for the duration of the program.
+    // This ensures logs are flushed and the background thread keeps running.
+    std::mem::forget(_guard);
+    // 2. Define the environment filter
+    // We look for LOG_LEVEL in .env, defaulting to "info"
+    let log_level = std::env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
+    
+    let env_filter = EnvFilter::from_default_env()
+        // Default level for the whole app
+        .add_directive(log_level.parse().unwrap_or_else(|_| "info".parse().unwrap()))
+        // Specifically ensure our crate is at the desired level
+        .add_directive(
+            format!("bazi_telegram_bot={}", log_level)
+                .parse()
+                .expect("Invalid log directive"),
+        );
+    // 3. Define the stdout layer (console)
+    let stdout_layer = fmt::layer().with_writer(std::io::stdout);
+    // 4. Define the file layer (no ANSI colors for the file)
+    let file_layer = fmt::layer().with_ansi(false).with_writer(non_blocking);
+    // 5. Initialize the registry with both layers
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(stdout_layer)
+        .with(file_layer)
         .init();
+
+    // 6. Post-initialization: Clean up logs older than 30 days
+    cleanup_old_logs(30);
+}
+
+/// Automatically removes log files in the "logs" directory that are older than the specified number of days.
+pub fn cleanup_old_logs(days: u64) {
+    let log_dir = "logs";
+    let now = SystemTime::now();
+    let max_age = Duration::from_secs(days * 24 * 60 * 60);
+
+    if let Ok(entries) = fs::read_dir(log_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // Only target files ending in .log
+            if path.is_file() && path.extension().map_or(false, |ext| ext == "log") {
+                if let Ok(metadata) = entry.metadata() {
+                    if let Ok(modified) = metadata.modified() {
+                        if let Ok(age) = now.duration_since(modified) {
+                            if age > max_age {
+                                if let Err(e) = fs::remove_file(&path) {
+                                    error!("Failed to delete old log file {:?}: {}", path, e);
+                                } else {
+                                    info!("Automatically removed old log file: {:?}", path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// A unified error type for the application.

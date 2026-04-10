@@ -1,5 +1,5 @@
 [Unit]
-Description=Dify Bazi Bot Service (Rust)
+Description=Bazi Telegram Bot Agent Service (Rust)
 After=network-online.target
 Wants=network-online.target
 
@@ -7,12 +7,12 @@ Wants=network-online.target
 Type=simple
 User=dietpi
 Group=dietpi
-WorkingDirectory=/home/dietpi/DifyBaziWorkflow
-ExecStart=/home/dietpi/DifyBaziWorkflow/target/release/dify-telegram-bot
+WorkingDirectory=/home/dietpi/BaziAgentWorkflow
+ExecStart=/home/dietpi/BaziAgentWorkflow/target/release/BaziAgentWorkflow
 Restart=always
 RestartSec=5
-# Environment file for TOKEN and DIFY_WEBHOOK_URL
-EnvironmentFile=/home/dietpi/DifyBaziWorkflow/.env
+# Environment file
+EnvironmentFile=/home/dietpi/BaziAgentWorkflow/.env
 
 [Install]
 WantedBy=multi-user.target

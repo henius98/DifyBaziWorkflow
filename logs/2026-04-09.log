@@ -1,0 +1,4 @@
+2026-04-09T16:50:11.586990Z ERROR async_openai::error: failed deserialization of: 404 page not found
+2026-04-09T16:50:11.587022Z ERROR bazi_telegram_bot_agent::logger: OpenAI API Exception occurred: failed to deserialize api response: invalid type: integer `404`, expected struct WrappedError at line 1 column 3
+2026-04-09T16:50:11.587037Z ERROR bazi_telegram_bot_agent::logger: Context Failed - LLM call failed: OpenAI API Error: failed to deserialize api response: invalid type: integer `404`, expected struct WrappedError at line 1 column 3
+2026-04-09T16:50:11.587069Z ERROR bazi_telegram_bot_agent::handlers: Error generating destiny reading: OpenAI API Error: failed to deserialize api response: invalid type: integer `404`, expected struct WrappedError at line 1 column 3

@@ -108,6 +108,9 @@ const BDCAL_PREFIX: &str = "bdcal";
 /// Birthdate calendar action types
 #[derive(Debug, Clone)]
 pub enum BirthdateCalAction {
+    ViewYears { start_year: i32 },
+    SelectYear(i32),
+    SelectMonth { year: i32, month: u32 },
     SelectDate(NaiveDate),
     PrevMonth { year: i32, month: u32 },
     NextMonth { year: i32, month: u32 },
@@ -118,6 +121,9 @@ impl BirthdateCalAction {
     #[allow(dead_code)]
     pub fn encode(&self) -> String {
         match self {
+            BirthdateCalAction::ViewYears { start_year } => format!("{}:vy:{}", BDCAL_PREFIX, start_year),
+            BirthdateCalAction::SelectYear(year) => format!("{}:sy:{}", BDCAL_PREFIX, year),
+            BirthdateCalAction::SelectMonth { year, month } => format!("{}:sm:{}:{}", BDCAL_PREFIX, year, month),
             BirthdateCalAction::SelectDate(date) => {
                 format!("{}:sel:{}:{}:{}", BDCAL_PREFIX, date.year(), date.month(), date.day())
             }
@@ -138,6 +144,19 @@ impl BirthdateCalAction {
         }
 
         match parts.get(1).copied() {
+            Some("vy") => {
+                let start_year: i32 = parts.get(2)?.parse().ok()?;
+                Some(BirthdateCalAction::ViewYears { start_year })
+            }
+            Some("sy") => {
+                let year: i32 = parts.get(2)?.parse().ok()?;
+                Some(BirthdateCalAction::SelectYear(year))
+            }
+            Some("sm") => {
+                let year: i32 = parts.get(2)?.parse().ok()?;
+                let month: u32 = parts.get(3)?.parse().ok()?;
+                Some(BirthdateCalAction::SelectMonth { year, month })
+            }
             Some("sel") => {
                 let year: i32 = parts.get(2)?.parse().ok()?;
                 let month: u32 = parts.get(3)?.parse().ok()?;
@@ -169,7 +188,111 @@ pub fn is_birthdate_cal_callback(data: &str) -> bool {
 /// Build an inline keyboard calendar for birthdate selection (/new command)
 pub fn build_birthdate_calendar(year: i32, month: u32) -> InlineKeyboardMarkup {
     // Birthdate calendar has no "Today" button and uses bdcal prefix
-    build_calendar_inner(year, month, BDCAL_PREFIX, false)
+    let mut markup = build_calendar_inner(year, month, BDCAL_PREFIX, false);
+    
+    // Add a Back to Month button
+    let back_row = vec![InlineKeyboardButton::callback("◀️ Change Month", BirthdateCalAction::SelectYear(year).encode())];
+    markup.inline_keyboard.push(back_row);
+    markup
+}
+
+pub fn build_year_picker(start_year: i32) -> InlineKeyboardMarkup {
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
+    
+    // Grid of 12 years (3x4)
+    for row_start in (0..12).step_by(3) {
+        let mut row = Vec::new();
+        for offset in 0..3 {
+            let y = start_year + row_start + offset;
+            row.push(InlineKeyboardButton::callback(
+                y.to_string(), 
+                BirthdateCalAction::SelectYear(y).encode()
+            ));
+        }
+        rows.push(row);
+    }
+    
+    // Nav row
+    rows.push(vec![
+        InlineKeyboardButton::callback("◀️ Prev 12", BirthdateCalAction::ViewYears { start_year: start_year - 12 }.encode()),
+        InlineKeyboardButton::callback("Next 12 ▶️", BirthdateCalAction::ViewYears { start_year: start_year + 12 }.encode()),
+    ]);
+    
+    InlineKeyboardMarkup::new(rows)
+}
+
+pub fn build_month_picker(year: i32) -> InlineKeyboardMarkup {
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
+    let month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    // Grid of 12 months (3x4)
+    for row_start in (0..12).step_by(3) {
+        let mut row = Vec::new();
+        for offset in 0..3 {
+            let m_idx = row_start + offset;
+            let m_num = (m_idx + 1) as u32;
+            row.push(InlineKeyboardButton::callback(
+                month_names[m_idx as usize].to_string(),
+                BirthdateCalAction::SelectMonth { year, month: m_num }.encode()
+            ));
+        }
+        rows.push(row);
+    }
+
+    // Back to year picker
+    let start_year = year - (year % 12);
+    rows.push(vec![InlineKeyboardButton::callback("◀️ Change Year", BirthdateCalAction::ViewYears { start_year }.encode())]);
+
+    InlineKeyboardMarkup::new(rows)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2.5 Gender Picker
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BDGEN_PREFIX: &str = "bdgen";
+
+#[derive(Debug, Clone)]
+pub enum GenderAction {
+    SelectMale,
+    SelectFemale,
+    Ignore,
+}
+
+impl GenderAction {
+    pub fn encode(&self) -> String {
+        match self {
+            GenderAction::SelectMale => format!("{}:m", BDGEN_PREFIX),
+            GenderAction::SelectFemale => format!("{}:f", BDGEN_PREFIX),
+            GenderAction::Ignore => format!("{}:ignore", BDGEN_PREFIX),
+        }
+    }
+
+    pub fn decode(data: &str) -> Option<GenderAction> {
+        let parts: Vec<&str> = data.split(':').collect();
+        if parts.is_empty() || parts[0] != BDGEN_PREFIX {
+            return None;
+        }
+
+        match parts.get(1).copied() {
+            Some("m") => Some(GenderAction::SelectMale),
+            Some("f") => Some(GenderAction::SelectFemale),
+            Some("ignore") => Some(GenderAction::Ignore),
+            _ => None,
+        }
+    }
+}
+
+pub fn is_gender_picker_callback(data: &str) -> bool {
+    data.starts_with(BDGEN_PREFIX)
+}
+
+pub fn build_gender_picker() -> InlineKeyboardMarkup {
+    let rows = vec![vec![
+        InlineKeyboardButton::callback("🧑 Male", GenderAction::SelectMale.encode()),
+        InlineKeyboardButton::callback("👩 Female", GenderAction::SelectFemale.encode()),
+    ]];
+    InlineKeyboardMarkup::new(rows)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -261,142 +384,12 @@ fn build_calendar_inner(
 // 4. Birth-time picker  (hour → minute two-step inline keyboard)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Callback data prefix for time picker actions
-const BDTIME_PREFIX: &str = "bdtime";
-
-/// Time picker action types
-/// Encoded as compact strings to stay under Telegram's 64-byte callback limit.
-#[derive(Debug, Clone)]
-pub enum TimePickerAction {
-    /// User selected an hour; show minute picker next
-    SelectHour { date: String, hour: u32 },
-    /// User selected a minute; ready to save
-    SelectMinute { date: String, hour: u32, minute: u32 },
-    /// Go back to the hour picker
-    BackToHours { date: String },
-    /// Ignore (header / decorative cells)
-    Ignore,
-}
-
-impl TimePickerAction {
-    /// Encode:
-    ///   SelectHour   → `bdtime:h:{HH}:{YYYY-MM-DD}`      (≤ 24 chars)
-    ///   SelectMinute → `bdtime:m:{HH}:{MM}:{YYYY-MM-DD}` (≤ 27 chars)
-    ///   Ignore       → `bdtime:ignore`
-    pub fn encode(&self) -> String {
-        match self {
-            TimePickerAction::SelectHour { date, hour } => {
-                format!("{}:h:{:02}:{}", BDTIME_PREFIX, hour, date)
-            }
-            TimePickerAction::SelectMinute { date, hour, minute } => {
-                format!("{}:m:{:02}:{:02}:{}", BDTIME_PREFIX, hour, minute, date)
-            }
-            TimePickerAction::BackToHours { date } => {
-                format!("{}:back:{}", BDTIME_PREFIX, date)
-            }
-            TimePickerAction::Ignore => format!("{}:ignore", BDTIME_PREFIX),
-        }
-    }
-
-    pub fn decode(data: &str) -> Option<TimePickerAction> {
-        let parts: Vec<&str> = data.splitn(5, ':').collect();
-        if parts.is_empty() || parts[0] != BDTIME_PREFIX {
-            return None;
-        }
-
-        match parts.get(1).copied() {
-            Some("h") => {
-                // bdtime:h:{HH}:{YYYY-MM-DD}  → after splitn(5): ["bdtime","h","08","2026-01-15"]
-                let hour: u32 = parts.get(2)?.parse().ok()?;
-                let date = parts.get(3)?.to_string();
-                Some(TimePickerAction::SelectHour { date, hour })
-            }
-            Some("m") => {
-                // bdtime:m:{HH}:{MM}:{YYYY-MM-DD} → splitn(5): ["bdtime","m","08","30","2026-01-15"]
-                let hour: u32 = parts.get(2)?.parse().ok()?;
-                let minute: u32 = parts.get(3)?.parse().ok()?;
-                let date = parts.get(4)?.to_string();
-                Some(TimePickerAction::SelectMinute { date, hour, minute })
-            }
-            Some("back") => {
-                // bdtime:back:{YYYY-MM-DD} → splitn(3): ["bdtime","back","2026-01-15"]
-                let parts3: Vec<&str> = data.splitn(3, ':').collect();
-                let date = parts3.get(2)?.to_string();
-                Some(TimePickerAction::BackToHours { date })
-            }
-            Some("ignore") => Some(TimePickerAction::Ignore),
-            _ => None,
-        }
-    }
-}
-
-/// Check if callback data is a time picker action
-pub fn is_time_picker_callback(data: &str) -> bool {
-    data.starts_with(BDTIME_PREFIX)
-}
-
-/// Build an hour picker inline keyboard after user selects their birthdate.
-/// Shows 24 hours in rows of 6.
-pub fn build_hour_picker(date: &str) -> InlineKeyboardMarkup {
-    let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
-
-    // Header
-    let ignore_cb = TimePickerAction::Ignore.encode();
-    rows.push(vec![InlineKeyboardButton::callback(
-        format!("📅 {} — Select birth hour (0–23):", date),
-        ignore_cb.clone(),
-    )]);
-
-    // Hours 00–23 in rows of 6
-    for row_start in (0u32..24).step_by(6) {
-        let row: Vec<InlineKeyboardButton> = (row_start..row_start + 6)
-            .map(|h| {
-                InlineKeyboardButton::callback(
-                    format!("{:02}", h),
-                    TimePickerAction::SelectHour { date: date.to_string(), hour: h }.encode(),
-                )
-            })
-            .collect();
-        rows.push(row);
-    }
-
-    InlineKeyboardMarkup::new(rows)
-}
-
-/// Build a minute picker inline keyboard after user selects an hour.
-/// Shows common minute values: :00  :15  :30  :45
-pub fn build_minute_picker(date: &str, hour: u32) -> InlineKeyboardMarkup {
-    let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
-
-    let ignore_cb = TimePickerAction::Ignore.encode();
-    rows.push(vec![InlineKeyboardButton::callback(
-        format!("🕐 {:02}:__ — Select birth minute:", hour),
-        ignore_cb.clone(),
-    )]);
-
-    // Minute options
-    let minutes = [0u32, 15, 30, 45];
-    let minute_row: Vec<InlineKeyboardButton> = minutes
-        .iter()
-        .map(|&m| {
-            InlineKeyboardButton::callback(
-                format!(":{:02}", m),
-                TimePickerAction::SelectMinute {
-                    date: date.to_string(),
-                    hour,
-                    minute: m,
-                }
-                .encode(),
-            )
-        })
-        .collect();
-    rows.push(minute_row);
-
-    // Back to hour picker
-    rows.push(vec![InlineKeyboardButton::callback(
-        "◀️ Change hour",
-        TimePickerAction::BackToHours { date: date.to_string() }.encode(),
-    )]);
-
-    InlineKeyboardMarkup::new(rows)
+pub fn build_time_webapp_inline(url: &str) -> InlineKeyboardMarkup {
+    let btn = InlineKeyboardButton::web_app(
+        "🕐 Open Time Picker",
+        teloxide::types::WebAppInfo {
+            url: url.parse().unwrap(),
+        },
+    );
+    InlineKeyboardMarkup::new(vec![vec![btn]])
 }

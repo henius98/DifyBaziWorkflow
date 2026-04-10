@@ -4,13 +4,21 @@ use std::env;
 /// This can be used as a template for other projects to centralize configuration loading.
 #[derive(Debug, Clone)]
 pub struct AppConfig {
-    pub token: String,
+    pub telegram_bot_token: String,
     pub openai_api_key: String,
     pub openai_api_base: String,
     pub llm_model_name: String,
     pub user_bazi: String,
     pub admin_chat_id: i64,
     pub database_url: String,
+    pub expiration_minutes: i64,
+    pub webapp_base_url: String,
+    pub server_port: u16,
+    pub bazi_job_cron: String,
+    pub context_cleanup_cron: String,
+    pub log_cleanup_cron: String,
+    pub log_retention_days: u64,
+    pub max_context_messages: usize,
 }
 
 impl AppConfig {
@@ -19,7 +27,7 @@ impl AppConfig {
         // Load .env file
         dotenvy::dotenv().ok();
 
-        let token = env::var("TOKEN").expect("TOKEN must be set in .env");
+        let telegram_bot_token = env::var("TELEGRAM_BOT_TOKEN").expect("TELEGRAM_BOT_TOKEN must be set in .env");
         
         let openai_api_key =
             env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set in .env");
@@ -33,16 +41,58 @@ impl AppConfig {
             .unwrap_or(0);
 
         let database_url =
-            env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://dify_bot.db".to_string());
+            env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://bazi_telegram_bot_agent.db".to_string());
+
+        let expiration_minutes = env::var("EXPIRATION_MINUTES")
+            .unwrap_or_else(|_| "30".to_string())
+            .parse::<i64>()
+            .unwrap_or(30);
+
+        let server_port = env::var("SERVER_PORT")
+            .unwrap_or_else(|_| "8080".to_string())
+            .parse::<u16>()
+            .unwrap_or(8080);
+
+        let mut webapp_base_url = env::var("WEBAPP_BASE_URL")
+            .unwrap_or_else(|_| env::var("WEBAPP_URL").unwrap_or_else(|_| "https://your-domain.com/webapp".to_string()));
+            
+        // Clean up: remove trailing slash and filename if user accidentally provided full path
+        if webapp_base_url.ends_with("/timepicker.html") {
+            webapp_base_url = webapp_base_url.replace("/timepicker.html", "");
+        }
+        if webapp_base_url.ends_with('/') {
+            webapp_base_url.pop();
+        }
+
+        let bazi_job_cron = env::var("BAZI_JOB_CRON").unwrap_or_else(|_| "0 0 14 * * *".to_string());
+        let context_cleanup_cron = env::var("CONTEXT_CLEANUP_CRON").unwrap_or_else(|_| "0 */5 * * * *".to_string());
+        let log_cleanup_cron = env::var("LOG_CLEANUP_CRON").unwrap_or_else(|_| "0 0 3 * * *".to_string());
+        let log_retention_days = env::var("LOG_RETENTION_DAYS")
+            .unwrap_or_else(|_| "30".to_string())
+            .parse::<u64>()
+            .unwrap_or(30);
+
+        let max_context_messages = env::var("MAX_CONTEXT_MESSAGES")
+            .unwrap_or_else(|_| "10".to_string())
+            .parse::<usize>()
+            .unwrap_or(10);
 
         Self {
-            token,
+            telegram_bot_token,
             openai_api_key,
             openai_api_base,
             llm_model_name,
             user_bazi,
             admin_chat_id,
             database_url,
+            expiration_minutes,
+            webapp_base_url,
+            server_port,
+            bazi_job_cron,
+            context_cleanup_cron,
+            log_cleanup_cron,
+            log_retention_days,
+            max_context_messages,
         }
     }
 }

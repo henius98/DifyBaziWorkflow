@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT,
     first_name TEXT,
     last_name TEXT,
+    bazi TEXT,
+    gender INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_active_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -13,7 +15,7 @@ CREATE TABLE IF NOT EXISTS requests (
     request_type TEXT NOT NULL,
     target_date TEXT,
     text_content TEXT,
-    dify_response TEXT,
+    llm_response TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(user_id)
 );

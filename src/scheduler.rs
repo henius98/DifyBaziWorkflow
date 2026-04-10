@@ -13,6 +13,10 @@ pub struct SchedulerConfig {
     pub bot: Bot,
     pub app_state: Arc<AppState>,
     pub admin_chat_id: i64,
+    pub bazi_job_cron: String,
+    pub context_cleanup_cron: String,
+    pub log_cleanup_cron: String,
+    pub log_retention_days: u64,
 }
 
 /// Start the background scheduler with:
@@ -27,7 +31,7 @@ pub async fn start_scheduler(
     let sched = JobScheduler::new().await?;
 
     let config_clone = config.clone();
-    let daily_job = Job::new_async("0 0 14 * * *", move |_uuid, _l| {
+    let daily_job = Job::new_async(config.bazi_job_cron.as_str(), move |_uuid, _l| {
         let cfg = config_clone.clone();
         Box::pin(async move {
             info!("Running scheduled Bazi job...");
@@ -69,7 +73,7 @@ pub async fn start_scheduler(
     sched.add(daily_job).await?;
 
     // Add cleanup job to run every 5 minutes
-    let cleanup_job = Job::new_async("0 */5 * * * *", move |_uuid, _l| {
+    let cleanup_job = Job::new_async(config.context_cleanup_cron.as_str(), move |_uuid, _l| {
         let contexts = user_contexts.clone();
         let last_active = user_last_active.clone();
         let exp_mins = expiration_minutes;
@@ -93,6 +97,14 @@ pub async fn start_scheduler(
         })
     })?;
     sched.add(cleanup_job).await?;
+
+    // Add log cleanup job to run daily
+    let log_retention = config.log_retention_days;
+    let log_cleanup_job = Job::new(config.log_cleanup_cron.as_str(), move |_uuid, _l| {
+        info!("Running daily log cleanup task...");
+        crate::logger::cleanup_old_logs(log_retention);
+    })?;
+    sched.add(log_cleanup_job).await?;
 
     sched.start().await?;
     info!("Scheduler started successfully");

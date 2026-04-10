@@ -1,12 +1,12 @@
 [package]
-name = "dify-telegram-bot"
+name = "bazi-telegram-bot-agent"
 version = "0.1.0"
 edition = "2024"
-description = "Dify Bazi Telegram Bot - A Telegram bot for Chinese almanac and Bazi analysis"
+description = "Bazi Telegram Bot - A Telegram bot for Chinese almanac and Bazi analysis"
 
 [dependencies]
 # Telegram Bot Framework
-teloxide = { version = "0.15", features = ["macros"] }
+teloxide = { version = "0.17", features = ["macros"] }
 
 # Async Runtime
 tokio = { version = "1", features = ["full"] }
@@ -21,7 +21,7 @@ async-openai = "0.26"
 anyhow = "1.0"
 
 # HTTP Webhook Server
-axum = "0.7"
+axum = "0.8"
 
 # Database
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "chrono", "macros", "migrate"] }
@@ -39,7 +39,8 @@ chrono-tz = "0.10"
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+tracing-appender = "0.2"
 
 # Scheduled Jobs
 tokio-cron-scheduler = "0.15"
@@ -49,3 +50,4 @@ dashmap = "6"
 
 # UUID for callback data
 uuid = { version = "1", features = ["v4"] }
+tower-http = { version = "0.6.8", features = ["fs"] }

@@ -37,7 +37,7 @@ pub async fn generate_bazi_reading(
 
     // 3. Build Prompt
     // Load the system prompt from the markdown file
-    let system_prompt_template = include_str!("../BaziHuangLiAssistantPrompt.md");
+    let system_prompt_template = include_str!("../prompts/BaziHuangLiAssistant.md");
 
     let system_message = ChatCompletionRequestSystemMessageArgs::default()
         .content(system_prompt_template)
@@ -50,7 +50,7 @@ pub async fn generate_bazi_reading(
     };
 
     let user_content = format!(
-        "请结合下信息以便进行精确排盘与推演：\n{}\n预测目标日期：{}\n{}",
+        "请结合下信息以便进行精确排盘与推演：\n{}\n预测目标日期:{}\n{}",
         user_bazi, date_value, context_data
     );
 
@@ -82,5 +82,67 @@ pub async fn generate_bazi_reading(
         }
     }
 
-    Err(crate::logger::AppError::context("No valid content in LLM response"))
+    Err(crate::logger::AppError::context(
+        "No valid content in LLM response",
+    ))
+}
+
+pub async fn generate_destiny_reading(
+    user_bazi_text: &str,
+    api_key: &str,
+    api_base: &str,
+    model_name: &str,
+) -> AppResult<String> {
+    info!("Generating destiny reading for new bazi profile...");
+
+    // Set up OpenAI Client
+    let mut config = OpenAIConfig::new().with_api_key(api_key);
+    if !api_base.is_empty() {
+        config = config.with_api_base(api_base);
+    }
+    let llm_client = Client::with_config(config);
+
+    // Load the system prompt from the markdown file for destiny reading
+    let system_prompt_template = include_str!("../prompts/UserBazi.md");
+
+    // Replace the placeholder with the actual Bazi info
+    let system_prompt = system_prompt_template.replace("{user bazi info}", user_bazi_text);
+
+    let system_message = ChatCompletionRequestSystemMessageArgs::default()
+        .content(system_prompt)
+        .build()?;
+
+    let user_message = ChatCompletionRequestUserMessageArgs::default()
+        .content("请为我进行八字命理解读。")
+        .build()?;
+
+    let request = CreateChatCompletionRequestArgs::default()
+        .model(model_name)
+        .messages([system_message.into(), user_message.into()])
+        .frequency_penalty(0.5)
+        .presence_penalty(0.5)
+        .temperature(0.2)
+        .top_p(0.75)
+        .build()?;
+
+    info!(
+        "Sending destiny reading request to LLM (Model: {})...",
+        model_name
+    );
+    let response = llm_client
+        .chat()
+        .create(request)
+        .await
+        .log_err_msg("LLM call failed")?;
+
+    if let Some(choice) = response.choices.first() {
+        if let Some(ref content) = choice.message.content {
+            info!("Received destiny reading response from LLM");
+            return Ok(content.clone());
+        }
+    }
+
+    Err(crate::logger::AppError::context(
+        "No valid content in LLM response",
+    ))
 }

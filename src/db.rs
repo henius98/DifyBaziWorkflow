@@ -56,11 +56,11 @@ pub async fn save_request(
     request_type: &str,
     target_date: Option<&str>,
     text_content: Option<&str>,
-    dify_response: Option<&str>,
+    llm_response: Option<&str>,
 ) {
     let result = sqlx::query(
         r#"
-        INSERT INTO requests (user_id, request_type, target_date, text_content, dify_response)
+        INSERT INTO requests (user_id, request_type, target_date, text_content, llm_response)
         VALUES (?1, ?2, ?3, ?4, ?5)
         "#,
     )
@@ -68,7 +68,7 @@ pub async fn save_request(
     .bind(request_type)
     .bind(target_date)
     .bind(text_content)
-    .bind(dify_response)
+    .bind(llm_response)
     .execute(pool)
     .await;
 
@@ -77,18 +77,20 @@ pub async fn save_request(
     }
 }
 
-pub async fn save_or_update_user_bazi(pool: &SqlitePool, user_id: i64, bazi: &str) {
+pub async fn save_or_update_user_bazi(pool: &SqlitePool, user_id: i64, bazi: &str, gender: u8) {
     let result = sqlx::query(
         r#"
-        INSERT INTO users (user_id, bazi, last_active_at)
-        VALUES (?1, ?2, CURRENT_TIMESTAMP)
+        INSERT INTO users (user_id, bazi, gender, last_active_at)
+        VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)
         ON CONFLICT(user_id) DO UPDATE SET
             bazi = excluded.bazi,
+            gender = excluded.gender,
             last_active_at = excluded.last_active_at
         "#,
     )
     .bind(user_id)
     .bind(bazi)
+    .bind(gender as i64)
     .execute(pool)
     .await;
 

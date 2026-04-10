@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Select Time</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            padding: 20px;
+            text-align: center;
+        }
+        h2 { margin-bottom: 20px; }
+        input[type="time"] {
+            font-size: 32px;
+            padding: 10px;
+            border-radius: 12px;
+            border: 2px solid var(--tg-theme-button-color, #2481cc);
+            background-color: var(--tg-theme-secondary-bg-color, #f1f1f1);
+            color: var(--tg-theme-text-color, #000);
+            outline: none;
+            width: 100%;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <h2>Select Birth Time</h2>
+    <input type="time" id="timePicker" required />
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        const timePicker = document.getElementById('timePicker');
+
+        timePicker.addEventListener('change', () => {
+            if (timePicker.value) {
+                tg.MainButton.setText("CONFIRM TIME");
+                tg.MainButton.show();
+            } else {
+                tg.MainButton.hide();
+            }
+        });
+
+        tg.MainButton.onClick(async () => {
+            if (timePicker.value) {
+                const userId = tg.initDataUnsafe?.user?.id;
+                if (!userId) {
+                    alert("User ID not found. Please open from Telegram.");
+                    return;
+                }
+
+                tg.MainButton.showProgress();
+                
+                try {
+                    const response = await fetch('/api/submit-time', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            user_id: userId,
+                            time: timePicker.value
+                        }),
+                    });
+
+                    const result = await response.json();
+                    if (result.success) {
+                        tg.close();
+                    } else {
+                        alert("Error: " + result.message);
+                        tg.MainButton.hideProgress();
+                    }
+                } catch (error) {
+                    alert("Network error: " + error);
+                    tg.MainButton.hideProgress();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
